@@ -92,19 +92,19 @@ class MainWindow(QMainWindow):
 
         # Boton eliminar usuario
         actions_layout = QHBoxLayout()
-        delete_button = QPushButton(QIcon("delete_icon.png"), "Eliminar")  
+        delete_button = QPushButton(QIcon("img/delete_icon.png"), "Eliminar")  
         delete_button.setStyleSheet("font-size: 16px; height: 50px;")
         delete_button.clicked.connect(self.delete_user)
         actions_layout.addWidget(delete_button)
 
         # Boton editar usuario
-        edit_button = QPushButton(QIcon("edit_icon.png"), "Editar")  
+        edit_button = QPushButton(QIcon("img/edit_icon.png"), "Editar")  
         edit_button.setStyleSheet("font-size: 16px; height: 50px;")
         edit_button.clicked.connect(self.edit_user)
         actions_layout.addWidget(edit_button)
 
         # Boton crear nuevo usuario
-        add_user_button = QPushButton(QIcon("create_icon.png"), "Crear Nuevo Usuario")
+        add_user_button = QPushButton(QIcon("img/create_icon.png"), "Crear Nuevo Usuario")
         add_user_button.setStyleSheet("font-size: 16px; height: 50px;")
         add_user_button.clicked.connect(self.create_user)
         actions_layout.addWidget(add_user_button)
