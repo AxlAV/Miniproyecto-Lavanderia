@@ -156,9 +156,9 @@ class MainWindow(QMainWindow):
 
         # Crear botones de acción (Eliminar, Editar) y el botón de añadir usuario
         actions_layout = QHBoxLayout()
-        delete_button = QPushButton(QIcon("delete_icon.png"), "Eliminar")  # Asumiendo que tienes un ícono para eliminar
+        delete_button = QPushButton(QIcon("img/delete_icon.png"), "Eliminar")  # Asumiendo que tienes un ícono para eliminar
         delete_button.clicked.connect(self.delete_user)
-        edit_button = QPushButton(QIcon("edit_icon.png"), "Editar")  # Asumiendo que tienes un ícono para editar
+        edit_button = QPushButton(QIcon("img/edit_icon.png"), "Editar")  # Asumiendo que tienes un ícono para editar
         edit_button.clicked.connect(self.edit_user)
         actions_layout.addWidget(delete_button)
         actions_layout.addWidget(edit_button)

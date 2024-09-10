@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QDialog, QFormLayout, QLineEdit, QLabel, QPushButton, QVBoxLayout, QMessageBox ,QHBoxLayout ,QTableWidget, QTableWidgetItem, QAbstractItemView
+from PyQt6.QtWidgets import QDialog, QFormLayout, QLineEdit, QHeaderView, QLabel, QPushButton, QVBoxLayout, QMessageBox ,QHBoxLayout ,QTableWidget, QTableWidgetItem, QAbstractItemView
 from PyQt6.QtCore import Qt
 from utils import is_valid_dni, is_valid_phone, is_valid_email
 from conn import connect_to_db
@@ -262,57 +262,245 @@ class SearchClientDialog(QDialog):
 class FacturaDetailsDialog(QDialog):
     def __init__(self, factura_id, dni_ruc, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Detalles de la Factura")
-        self.setFixedSize(400, 200)  # Ajusta el tamaño según tus necesidades
-
         self.factura_id = factura_id
         self.dni_ruc = dni_ruc
+        self.init_ui()
+        self.load_invoice_details()
 
-        layout = QVBoxLayout()
+    def init_ui(self):
+        self.setWindowTitle("Detalles de la Factura")
+        self.setFixedSize(800, 600)  # Ajusta el tamaño del diálogo según sea necesario
 
-        # Layout para los detalles
-        details_layout = QHBoxLayout()
-        
-        # Etiquetas y campos de texto
-        id_label = QLabel(f"ID Factura: {factura_id}")
-        dni_ruc_label = QLabel(f"DNI/RUC: {dni_ruc}")
-        self.name_label = QLabel("Nombre Cliente: Cargando...")
+        # Crear layout principal
+        main_layout = QVBoxLayout()
 
-        details_layout.addWidget(id_label)
-        details_layout.addStretch()
-        details_layout.addWidget(dni_ruc_label)
+        # Crear layout para ID factura y DNI/RUC
+        top_layout = QHBoxLayout()
+        id_label = QLabel(f"ID Factura: {self.factura_id}")
+        dni_ruc_label = QLabel(f"DNI/RUC: {self.dni_ruc}")
 
-        layout.addLayout(details_layout)
-        layout.addWidget(self.name_label)
+        # Crear etiqueta para nombre completo
+        self.nombre_completo_label = QLabel("Nombre completo: Cargando...")
 
-        # Botón para cerrar el diálogo
-        close_button = QPushButton("Cerrar")
-        close_button.clicked.connect(self.accept)
-        layout.addWidget(close_button)
+        top_layout.addWidget(id_label)
+        top_layout.addWidget(dni_ruc_label)
+        top_layout.addWidget(self.nombre_completo_label)
 
-        self.setLayout(layout)
+        main_layout.addLayout(top_layout)
 
-        # Cargar el nombre completo del cliente
-        self.load_client_name()
+        # Crear tabla para detalles de la factura
+        self.details_table = QTableWidget()
+        self.details_table.setColumnCount(4)
+        self.details_table.setHorizontalHeaderLabels(["Servicio", "Cantidad", "Precio Unitario", "Total"])
 
-    def load_client_name(self):
-        try:
-            connection = connect_to_db()  # Asegúrate de que esta función esté definida
-            if connection:
-                cursor = connection.cursor()
-                # Consulta para obtener el nombre completo del cliente
+        # Configurar el ajuste de columnas
+        header = self.details_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Servicio
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Cantidad
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Precio Unitario
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Total
+
+        # Agregar la tabla al layout principal
+        main_layout.addWidget(self.details_table)
+
+        # Crear botones de cancelar y pagar
+        buttons_layout = QHBoxLayout()
+        cancel_button = QPushButton("Cancelar")
+        cancel_button.clicked.connect(self.reject)
+        pay_button = QPushButton("Pagar")
+        pay_button.clicked.connect(self.pay_invoice)
+
+        buttons_layout.addWidget(cancel_button)
+        buttons_layout.addWidget(pay_button)
+
+        main_layout.addLayout(buttons_layout)
+
+        # Establecer el layout en el diálogo
+        self.setLayout(main_layout)
+
+    def load_invoice_details(self):
+        connection = connect_to_db()
+        if connection:
+            cursor = connection.cursor()
+            
+            # Obtener nombre completo del cliente
+            query = """
+            SELECT c.Nombre + ' ' + c.ApellidoPaterno + ' ' + c.ApellidoMaterno AS NombreCompleto
+            FROM Clientes c
+            JOIN Facturas f ON c.ClienteID = f.ClienteID
+            WHERE f.FacturasID = ?
+            """
+            cursor.execute(query, (self.factura_id,))
+            result = cursor.fetchone()
+            if result:
+                self.nombre_completo_label.setText(f"Nombre completo: {result[0]}")
+            
+            # Obtener detalles de la factura
+            query = """
+            SELECT f.Descripcion
+            FROM Facturas f
+            WHERE f.FacturasID = ?
+            """
+            cursor.execute(query, (self.factura_id,))
+            descripcion = cursor.fetchone()[0]
+            services = self.parse_description(descripcion)
+            
+            # Limpiar la tabla antes de agregar datos
+            self.details_table.setRowCount(0)
+            
+            for service_id, quantity in services:
+                # Obtener el nombre del servicio y el precio unitario
                 query = """
-                SELECT c.Nombre
-                FROM Clientes c
-                JOIN Facturas f ON c.ClienteID = f.ClienteID
-                WHERE f.FacturasID = ?
+                SELECT NombreServicio, Precio
+                FROM Servicios
+                WHERE ServiciosID = ?
+                """
+                cursor.execute(query, (service_id,))
+                service_data = cursor.fetchone()
+                if service_data:
+                    service_name = service_data[0]
+                    unit_price = service_data[1]
+                    
+                    # Calcular total
+                    total = quantity * unit_price
+                    
+                    # Insertar fila en la tabla
+                    row_position = self.details_table.rowCount()
+                    self.details_table.insertRow(row_position)
+                    self.details_table.setItem(row_position, 0, QTableWidgetItem(service_name))
+                    self.details_table.setItem(row_position, 1, QTableWidgetItem(str(quantity)))
+                    self.details_table.setItem(row_position, 2, QTableWidgetItem(f"{unit_price:.2f}"))
+                    self.details_table.setItem(row_position, 3, QTableWidgetItem(f"{total:.2f}"))
+
+            connection.close()
+
+    def parse_description(self, description):
+        # Parsear la descripción para obtener pares (service_id, quantity)
+        services = []
+        items = description.split(',')
+        for item in items:
+            service_id, quantity = item.split('-')
+            services.append((int(service_id), int(quantity)))
+        return services
+
+    def pay_invoice(self):
+        connection = connect_to_db()
+        if connection:
+            cursor = connection.cursor()
+
+            # Obtener el monto total de la factura
+            query = """
+            SELECT MontoTotal
+            FROM Facturas
+            WHERE FacturasID = ?
+            """
+            cursor.execute(query, (self.factura_id,))
+            result = cursor.fetchone()
+            if result:
+                monto_pago = result[0]
+
+                # Actualizar el estado de la factura
+                query = """
+                UPDATE Facturas
+                SET Estado = 'Pagado'
+                WHERE FacturasID = ?
                 """
                 cursor.execute(query, (self.factura_id,))
-                client_name = cursor.fetchone()
-                if client_name:
-                    self.name_label.setText(f"Nombre Cliente: {client_name[0]}")
-                else:
-                    self.name_label.setText("Nombre Cliente: No encontrado")
+
+                # Insertar el pago en la tabla Pagos
+                query = """
+                INSERT INTO Pagos (FacturasID, MontoPago, MétodoPago)
+                VALUES (?, ?, 'Efectivo')
+                """
+                cursor.execute(query, (self.factura_id, monto_pago))
+                
+                connection.commit()
                 connection.close()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo cargar el nombre del cliente: {e}")
+                
+                QMessageBox.information(self, "Éxito", "Factura marcada como pagada y registro de pago creado.")
+                self.accept()
+            else:
+                QMessageBox.warning(self, "Error", "No se encontró el monto total para la factura.")
+        else:
+            QMessageBox.warning(self, "Error", "No se pudo conectar a la base de datos.")
+
+
+
+class AddServiceDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("Agregar Servicio")
+        self.setFixedSize(400, 200)
+        
+        # Crear layout principal
+        layout = QVBoxLayout()
+
+        # Crear campos de entrada
+        self.name_input = QLineEdit()
+        self.description_input = QLineEdit()
+        self.price_input = QLineEdit()
+
+        # Crear etiquetas
+        name_label = QLabel("Nombre del servicio:")
+        description_label = QLabel("Descripción:")
+        price_label = QLabel("Precio:")
+
+        # Crear botones
+        buttons_layout = QHBoxLayout()
+        cancel_button = QPushButton("Cancelar")
+        add_button = QPushButton("Agregar")
+
+        # Conectar señales
+        cancel_button.clicked.connect(self.reject)
+        add_button.clicked.connect(self.add_service)
+
+        # Agregar widgets al layout
+        layout.addWidget(name_label)
+        layout.addWidget(self.name_input)
+        layout.addWidget(description_label)
+        layout.addWidget(self.description_input)
+        layout.addWidget(price_label)
+        layout.addWidget(self.price_input)
+        
+        buttons_layout.addWidget(cancel_button)
+        buttons_layout.addWidget(add_button)
+        layout.addLayout(buttons_layout)
+
+        # Establecer el layout en el diálogo
+        self.setLayout(layout)
+
+    def add_service(self):
+        # Obtener los valores de los campos
+        name = self.name_input.text()
+        description = self.description_input.text()
+        price_text = self.price_input.text()
+
+        # Validar la entrada
+        if not name or not description or not price_text:
+            QMessageBox.warning(self, "Advertencia", "Por favor, completa todos los campos.")
+            return
+
+        try:
+            price = float(price_text)
+        except ValueError:
+            QMessageBox.warning(self, "Error", "El precio debe ser un número válido.")
+            return
+
+        # Insertar el nuevo servicio en la base de datos
+        connection = connect_to_db()
+        if connection:
+            cursor = connection.cursor()
+            query = """
+            INSERT INTO Servicios (NombreServicio, Descripcion, Precio)
+            VALUES (?, ?, ?)
+            """
+            cursor.execute(query, (name, description, price))
+            connection.commit()
+            connection.close()
+            QMessageBox.information(self, "Éxito", "Servicio agregado con éxito")
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Error", "No se pudo conectar a la base de datos")
