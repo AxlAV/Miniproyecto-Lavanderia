@@ -1,28 +1,28 @@
 import sys, re
-from PyQt6.QtWidgets import QApplication, QComboBox, QInputDialog, QStackedWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QTableWidget, QTableWidgetItem, QWidget, QMessageBox, QDialog, QAbstractItemView, QMenu
+from PyQt6.QtWidgets import QApplication, QComboBox, QHeaderView, QLabel, QStyledItemDelegate, QInputDialog, QStackedWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QTableWidget, QTableWidgetItem, QWidget, QMessageBox, QDialog, QAbstractItemView, QMenu
 from PyQt6.QtGui import QIcon, QAction, QClipboard
 from PyQt6.QtCore import Qt
 from datetime import datetime
-from dialogs import EditUserDialog, UserDialog
+from dialogs import EditUserDialog, UserDialog, SearchClientDialog, FacturaDetailsDialog
 from utils import *
 from conn import connect_to_db
+from functools import partial
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Factura lavandería")
-        self.setFixedSize(1200, 800)
-        # Obtener el tamaño de la pantalla y la ventana
+        self.setFixedSize(1200, 800)  # Fija el tamaño de la ventana
+
+        # Obtener el tamaño de la pantalla
         screen_geometry = QApplication.primaryScreen().availableGeometry()
-        window_geometry = self.frameGeometry()
 
         # Calcular la posición centrada
-        x = (screen_geometry.width() - window_geometry.width()) // 2
-        y = (screen_geometry.height() - window_geometry.height()) // 2
+        x = (screen_geometry.width() - 1200) // 2
+        y = (screen_geometry.height() - 800) // 2
 
         # Ajustar la posición de la ventana
         self.move(x, y)
-        self.setGeometry(x, y, 1200, 800)
 
         # Crear un QStackedWidget para gestionar múltiples layouts
         self.stacked_widget = QStackedWidget()
@@ -32,6 +32,7 @@ class MainWindow(QMainWindow):
         self.create_main_layout()
         self.create_clientes_layout()
         self.create_facturas_layout()
+        self.create_pagos_layout()
 
         # Inicialmente mostrar el layout principal
         self.stacked_widget.setCurrentIndex(0)
@@ -65,14 +66,25 @@ class MainWindow(QMainWindow):
         # Crear el layout de clientes
         clientes_layout = QVBoxLayout()
 
-        # Crear el buscador y el botón de búsqueda
+        # Crear el buscador y los botones de búsqueda, refrescar y regresar
         search_layout = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Buscar usuario...")
         search_button = QPushButton("Buscar")
         search_button.clicked.connect(self.search_users)
+        
+        # Botón refrescar
+        refresh_button = QPushButton("Refrescar")
+        refresh_button.clicked.connect(self.refresh_clientes)  # Conectar al método para refrescar
+
+        # Botón regresar
+        regresar_button = QPushButton("Regresar")
+        regresar_button.clicked.connect(self.regresar)  # Conectar al método de regresar
+        
         search_layout.addWidget(self.search_input)
         search_layout.addWidget(search_button)
+        search_layout.addWidget(refresh_button)  # Agregar el botón "Refrescar"
+        search_layout.addWidget(regresar_button)  # Agregar el botón "Regresar"
         clientes_layout.addLayout(search_layout)
 
         # Crear la tabla de usuarios
@@ -90,20 +102,20 @@ class MainWindow(QMainWindow):
         self.user_table.setSortingEnabled(True)
         clientes_layout.addWidget(self.user_table)
 
-        # Boton eliminar usuario
+        # Botón eliminar usuario
         actions_layout = QHBoxLayout()
         delete_button = QPushButton(QIcon("img/delete_icon.png"), "Eliminar")  
         delete_button.setStyleSheet("font-size: 16px; height: 50px;")
         delete_button.clicked.connect(self.delete_user)
         actions_layout.addWidget(delete_button)
 
-        # Boton editar usuario
+        # Botón editar usuario
         edit_button = QPushButton(QIcon("img/edit_icon.png"), "Editar")  
         edit_button.setStyleSheet("font-size: 16px; height: 50px;")
         edit_button.clicked.connect(self.edit_user)
         actions_layout.addWidget(edit_button)
 
-        # Boton crear nuevo usuario
+        # Botón crear nuevo usuario
         add_user_button = QPushButton(QIcon("img/create_icon.png"), "Crear Nuevo Usuario")
         add_user_button.setStyleSheet("font-size: 16px; height: 50px;")
         add_user_button.clicked.connect(self.create_user)
@@ -130,51 +142,6 @@ class MainWindow(QMainWindow):
         self.user_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.user_table.customContextMenuRequested.connect(self.show_context_menu)
 
-    def create_facturas_layout(self):
-        # Crear el layout para la factura
-        facturas_layout = QVBoxLayout()
-
-        # Crear el buscador de clientes
-        search_layout = QHBoxLayout()
-        self.client_search_input = QLineEdit()
-        self.client_search_input.setPlaceholderText("Buscar cliente por DNI/RUC o nombre...")
-        search_button = QPushButton("Buscar")
-        search_button.clicked.connect(self.search_client)
-        search_layout.addWidget(self.client_search_input)
-        search_layout.addWidget(search_button)
-        facturas_layout.addLayout(search_layout)
-
-        # Crear el combo box para seleccionar servicios
-        self.service_combo = QComboBox()
-        self.service_combo.addItem("Seleccione un servicio")
-        # Populate with services from the database
-        self.load_services()
-        facturas_layout.addWidget(self.service_combo)
-
-        # Botón para añadir servicio
-        add_service_button = QPushButton("Agregar Servicio")
-        add_service_button.clicked.connect(self.add_service_to_invoice)
-        facturas_layout.addWidget(add_service_button)
-
-        # Crear la tabla de servicios seleccionados
-        self.services_table = QTableWidget()
-        self.services_table.setColumnCount(4)
-        self.services_table.setHorizontalHeaderLabels(["Servicio", "Cantidad", "Precio Unitario", "Total"])
-        self.services_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)  # No editable
-        self.services_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        facturas_layout.addWidget(self.services_table)
-
-        # Botón para guardar factura
-        save_invoice_button = QPushButton("Guardar Factura")
-        save_invoice_button.clicked.connect(self.save_invoice)
-        facturas_layout.addWidget(save_invoice_button)
-
-        # Crear un widget para el layout de facturas
-        facturas_widget = QWidget()
-        facturas_widget.setLayout(facturas_layout)
-        self.stacked_widget.addWidget(facturas_widget)
-
-        
     def show_context_menu(self, pos):
         context_menu = QMenu()
         copy_action = QAction("Copiar", self)
@@ -250,6 +217,10 @@ class MainWindow(QMainWindow):
                     self.user_table.setItem(row_position, col, item)
             
             connection.close()
+
+    def refresh_clientes(self):
+        # Método para refrescar la lista de clientes
+        self.load_clientes()
 
 
     def delete_user(self):
@@ -355,80 +326,160 @@ class MainWindow(QMainWindow):
 
     def create_user(self):
         dialog = UserDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            user_data = dialog.get_user_data()
+        
+        # Mostrar el diálogo hasta que el usuario lo cierre con éxito o cancele
+        while True:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                user_data = dialog.get_user_data()
 
-            # Validar DNI/RUC
-            if not is_valid_dni(user_data['dni_ruc']):
-                QMessageBox.warning(self, "Advertencia", "El DNI/RUC debe contener solo números y un máximo de 20 caracteres.")
-                return
+                # Validar DNI/RUC
+                if not is_valid_dni(user_data['dni_ruc']):
+                    QMessageBox.warning(self, "Advertencia", "El DNI/RUC debe contener solo números y un máximo de 20 caracteres.")
+                    continue  # Volver a mostrar el diálogo para corrección
+                
+                # Validar el teléfono y el correo
+                if not is_valid_phone(user_data['telefono']):
+                    QMessageBox.warning(self, "Advertencia", "El teléfono debe contener solo números.")
+                    continue  # Volver a mostrar el diálogo para corrección
+                
+                if not is_valid_email(user_data['correo']):
+                    QMessageBox.warning(self, "Advertencia", "El correo debe tener la estructura '***@***.com'.")
+                    continue  # Volver a mostrar el diálogo para corrección
 
-            # Validar el teléfono y el correo
-            if not is_valid_phone(user_data['telefono']):
-                QMessageBox.warning(self, "Advertencia", "El teléfono debe contener solo números.")
-                return
-            
-            if not is_valid_email(user_data['correo']):
-                QMessageBox.warning(self, "Advertencia", "El correo debe tener la estructura '___@___.com'.")
-                return
+                try:
+                    connection = connect_to_db()
+                    if connection:
+                        cursor = connection.cursor()
+                        
+                        # Insertar datos en la base de datos
+                        cursor.execute(
+                            "INSERT INTO Clientes ([DNI/RUC], Nombre, ApellidoPaterno, ApellidoMaterno, Dirección, Teléfono, Correo) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            user_data['dni_ruc'],
+                            user_data['nombre'],
+                            user_data['apellido_paterno'],
+                            user_data['apellido_materno'],
+                            user_data['direccion'],
+                            user_data['telefono'],
+                            user_data['correo']
+                        )
+                        connection.commit()
+                        connection.close()
 
-            try:
-                connection = connect_to_db()
-                if connection:
-                    cursor = connection.cursor()
-                    
-                    # Insertar datos en la base de datos
-                    cursor.execute(
-                        "INSERT INTO Clientes ([DNI/RUC], Nombre, ApellidoPaterno, ApellidoMaterno, Dirección, Teléfono, Correo) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        user_data['dni_ruc'],
-                        user_data['nombre'],
-                        user_data['apellido_paterno'],
-                        user_data['apellido_materno'],
-                        user_data['direccion'],
-                        user_data['telefono'],
-                        user_data['correo']
-                    )
-                    connection.commit()
-                    connection.close()
+                        # Añadir el nuevo usuario a la tabla
+                        row_position = self.user_table.rowCount()
+                        self.user_table.insertRow(row_position)
+                        self.user_table.setItem(row_position, 0, QTableWidgetItem(user_data['dni_ruc']))
+                        self.user_table.setItem(row_position, 1, QTableWidgetItem(user_data['nombre']))
+                        self.user_table.setItem(row_position, 2, QTableWidgetItem(user_data['apellido_paterno']))
+                        self.user_table.setItem(row_position, 3, QTableWidgetItem(user_data['apellido_materno']))
+                        self.user_table.setItem(row_position, 4, QTableWidgetItem(user_data['direccion']))
+                        self.user_table.setItem(row_position, 5, QTableWidgetItem(user_data['telefono']))
+                        self.user_table.setItem(row_position, 6, QTableWidgetItem(user_data['correo']))
+                        
+                        QMessageBox.information(self, "Éxito", "Usuario creado.")
+                        break  # Salir del bucle si todo ha sido exitoso
 
-                    # Añadir el nuevo usuario a la tabla
-                    row_position = self.user_table.rowCount()
-                    self.user_table.insertRow(row_position)
-                    self.user_table.setItem(row_position, 0, QTableWidgetItem(user_data['dni_ruc']))
-                    self.user_table.setItem(row_position, 1, QTableWidgetItem(user_data['nombre']))
-                    self.user_table.setItem(row_position, 2, QTableWidgetItem(user_data['apellido_paterno']))
-                    self.user_table.setItem(row_position, 3, QTableWidgetItem(user_data['apellido_materno']))
-                    self.user_table.setItem(row_position, 4, QTableWidgetItem(user_data['direccion']))
-                    self.user_table.setItem(row_position, 5, QTableWidgetItem(user_data['telefono']))
-                    self.user_table.setItem(row_position, 6, QTableWidgetItem(user_data['correo']))
-                    
-                    QMessageBox.information(self, "Éxito", "Usuario creado.")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Error al crear el usuario: {e}")
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Error al crear el usuario: {e}")
+                    break  # Salir del bucle en caso de error
 
-    def search_client(self):
-        search_text = self.client_search_input.text()
-        if not search_text:
-            QMessageBox.warning(self, "Advertencia", "Por favor, ingresa un término de búsqueda.")
-            return
+    def create_facturas_layout(self):
+        # Crear el layout para la factura
+        facturas_layout = QVBoxLayout()
 
-        connection = connect_to_db()
-        if connection:
-            cursor = connection.cursor()
-            query = """
-            SELECT ClienteID, [DNI/RUC], Nombre
-            FROM Clientes
-            WHERE [DNI/RUC] LIKE ? OR Nombre LIKE ?
-            """
-            cursor.execute(query, f'%{search_text}%', f'%{search_text}%')
-            clients = cursor.fetchall()
-            
-            # Implement a way to select a client from search results
-            # For now, assuming we are just printing the results
-            for client in clients:
-                print(client)  # Replace this with a suitable way to select a client
-            
-            connection.close()
+        # Crear el buscador de clientes
+        search_layout = QHBoxLayout()
+        self.dni_ruc_display = QLineEdit()
+        self.dni_ruc_display.setPlaceholderText("DNI/RUC")
+        self.dni_ruc_display.setReadOnly(True)  # No editable
+
+        self.nombre_display = QLineEdit()
+        self.nombre_display.setPlaceholderText("Nombre completo")
+        self.nombre_display.setReadOnly(True)  # No editable
+
+        search_button = QPushButton("Buscar")
+        search_button.clicked.connect(self.open_search_dialog)
+        
+        search_layout.addWidget(self.dni_ruc_display)
+        search_layout.addWidget(self.nombre_display)
+        search_layout.addWidget(search_button)
+        facturas_layout.addLayout(search_layout)
+
+        # Crear el combo box para seleccionar servicios
+        self.service_combo = QComboBox()
+        self.service_combo.addItem("Seleccione un servicio")
+        # Populate with services from the database
+        self.load_services()
+        facturas_layout.addWidget(self.service_combo)
+
+        # Botón para añadir servicio
+        add_service_button = QPushButton("Agregar Servicio")
+        add_service_button.clicked.connect(self.add_service_to_invoice)
+        facturas_layout.addWidget(add_service_button)
+
+        # Crear la tabla de servicios seleccionados
+        self.services_table = QTableWidget()
+        self.services_table.setColumnCount(4)
+        self.services_table.setHorizontalHeaderLabels(["Servicio", "Cantidad", "Precio Unitario", "Total"])
+
+        # Configurar el ajuste de columnas
+        header = self.services_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Servicio: 50%
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Cantidad
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Precio Unitario
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Total
+
+        # Hacer solo la columna de cantidad editable
+        self.services_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)  # No editable por defecto
+        self.services_table.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
+        self.services_table.setItemDelegateForColumn(1, QStyledItemDelegate())  # Editable solo en la columna de cantidad
+
+        self.services_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.services_table.itemChanged.connect(self.recalculate_total)
+        facturas_layout.addWidget(self.services_table)
+
+        # Botón para eliminar servicio
+        remove_service_button = QPushButton("Eliminar Servicio")
+        remove_service_button.clicked.connect(self.remove_selected_service)
+        facturas_layout.addWidget(remove_service_button)
+
+        # Botón para guardar factura
+        save_invoice_button = QPushButton("Guardar Factura")
+        save_invoice_button.clicked.connect(self.save_invoice)
+        facturas_layout.addWidget(save_invoice_button)
+
+        # Crear un widget para el layout de facturas
+        facturas_widget = QWidget()
+        facturas_widget.setLayout(facturas_layout)
+        self.stacked_widget.addWidget(facturas_widget)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.adjust_table_column_widths()
+
+    def adjust_table_column_widths(self):
+        total_width = self.services_table.width()
+        service_col_width = int(0.5 * total_width)  # 50% for the service column
+        other_col_width = int((total_width - service_col_width) / 3)  # Distribute the remaining width
+
+        self.services_table.setColumnWidth(0, service_col_width)
+        self.services_table.setColumnWidth(1, other_col_width)
+        self.services_table.setColumnWidth(2, other_col_width)
+        self.services_table.setColumnWidth(3, other_col_width)
+
+    def open_search_dialog(self):
+        search_dialog = SearchClientDialog(self.dni_ruc_display, self.nombre_display, self)
+        search_dialog.exec()
+
+    
+    def open_search_dialog(self):
+        dialog = SearchClientDialog(self)
+        dialog.client_selected.connect(self.update_client_display)
+        dialog.exec()
+
+    def update_client_display(self, dni_ruc, nombre_completo):
+        self.dni_ruc_display.setText(dni_ruc)
+        self.nombre_display.setText(nombre_completo)
 
     def load_services(self):
         connection = connect_to_db()
@@ -445,50 +496,261 @@ class MainWindow(QMainWindow):
 
 
     def add_service_to_invoice(self):
-        service_id = self.service_combo.currentData()
-        service_name = self.service_combo.currentText()
-        quantity, ok = QInputDialog.getInt(self, "Cantidad", "Ingrese la cantidad:", 1, 1, 100, 1)
-        if ok and service_id:
-            connection = connect_to_db()
-            if connection:
-                cursor = connection.cursor()
-                cursor.execute("SELECT Precio FROM Servicios WHERE ServicioID = ?", service_id)
-                price = cursor.fetchone()[0]
-                total = quantity * price
-                row_position = self.services_table.rowCount()
-                self.services_table.insertRow(row_position)
-                self.services_table.setItem(row_position, 0, QTableWidgetItem(service_name))
-                self.services_table.setItem(row_position, 1, QTableWidgetItem(str(quantity)))
-                self.services_table.setItem(row_position, 2, QTableWidgetItem(f"{price:.2f}"))
-                self.services_table.setItem(row_position, 3, QTableWidgetItem(f"{total:.2f}"))
-                connection.close()
+        selected_service_id = self.service_combo.currentData()  # Get the selected service ID
+        selected_service_name = self.service_combo.currentText()  # Get the selected service name
+
+        # Verifica si se ha seleccionado un servicio
+        if selected_service_id is None:
+            QMessageBox.warning(self, "Advertencia", "Por favor, seleccione un servicio.")
+            return
+
+        unit_price = self.get_service_price(selected_service_id)  # Get service unit price
+
+        if unit_price is not None:
+            row_position = self.services_table.rowCount()
+            self.services_table.insertRow(row_position)
+
+            # Add service name
+            self.services_table.setItem(row_position, 0, QTableWidgetItem(selected_service_name))
+
+            # Add default quantity
+            quantity_item = QTableWidgetItem("1")
+            quantity_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+            self.services_table.setItem(row_position, 1, quantity_item)
+
+            # Add unit price
+            unit_price_item = QTableWidgetItem(f"{unit_price:.2f}")
+            unit_price_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+            self.services_table.setItem(row_position, 2, unit_price_item)
+
+            # Add total
+            total_item = QTableWidgetItem(f"{unit_price:.2f}")
+            total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+            self.services_table.setItem(row_position, 3, total_item)
+
+            # Disconnect existing signals to avoid multiple connections
+            self.services_table.itemChanged.disconnect(self.recalculate_total)
+
+            # Connect itemChanged signal to recalculate total
+            self.services_table.itemChanged.connect(self.recalculate_total)
+
+
+
+    def get_service_price(self, service_id):
+        connection = connect_to_db()
+        if connection:
+            cursor = connection.cursor()
+            query = "SELECT Precio FROM Servicios WHERE ServiciosID = ?"
+            cursor.execute(query, (service_id,))
+            price = cursor.fetchone()[0]
+            connection.close()
+            return price
+        return 0
+
+    def recalculate_total(self, item):
+        if item.column() == 1:  # Solo recalcular si la columna editada es la de cantidad
+            row = item.row()
+            quantity_item = self.services_table.item(row, 1)
+            unit_price_item = self.services_table.item(row, 2)
+            
+            try:
+                quantity = float(quantity_item.text())
+                unit_price = float(unit_price_item.text())
+                total = quantity * unit_price
+                total_item = self.services_table.item(row, 3)
+                total_item.setText(f"{total:.2f}")
+            except (ValueError, AttributeError):
+                # Handle cases where conversion fails or item is None
+                pass
+
+
+
+    def remove_selected_service(self):
+        selected_row = self.services_table.currentRow()
+        if selected_row >= 0:
+            self.services_table.removeRow(selected_row)
 
 
     def save_invoice(self):
-        try:
-            connection = connect_to_db()
-            if connection:
-                cursor = connection.cursor()
-                client_id = 1  # Replace this with the actual client ID
-                total_amount = sum(float(self.services_table.item(row, 3).text()) for row in range(self.services_table.rowCount()))
-                cursor.execute("INSERT INTO Facturas (ClienteID, MontoTotal) VALUES (?, ?)", client_id, total_amount)
-                factura_id = cursor.lastrowid
-                
-                for row in range(self.services_table.rowCount()):
-                    service_name = self.services_table.item(row, 0).text()
-                    quantity = int(self.services_table.item(row, 1).text())
-                    price = float(self.services_table.item(row, 2).text())
-                    # Retrieve the service ID based on the service name or another approach
-                    cursor.execute("SELECT ServicioID FROM Servicios WHERE NombreServicio = ?", service_name)
-                    service_id = cursor.fetchone()[0]
-                    cursor.execute("INSERT INTO FacturaServicios (FacturaID, ServicioID, Cantidad, PrecioUnitario) VALUES (?, ?, ?, ?)",
-                                factura_id, service_id, quantity, price)
-                
-                connection.commit()
-                connection.close()
-                QMessageBox.information(self, "Éxito", "Factura guardada.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al guardar la factura: {e}")
+        # Obtener el DNI/RUC del cliente
+        dni_ruc = self.dni_ruc_display.text()
+        
+        # Obtener el ClienteID basado en el DNI/RUC
+        cliente_id = self.get_client_id_by_dni_ruc(dni_ruc)
+        if cliente_id is None:
+            QMessageBox.warning(self, "Error", "Cliente no encontrado")
+            return
+
+        # Construir la descripción de la factura
+        descripcion = []
+        total_amount = 0.0
+        for row in range(self.services_table.rowCount()):
+            service_id_item = self.services_table.item(row, 0)
+            quantity_item = self.services_table.item(row, 1)
+            total_item = self.services_table.item(row, 3)
+
+            if service_id_item and quantity_item and total_item:
+                service_id = service_id_item.text()
+                quantity = quantity_item.text()
+                total = total_item.text()
+
+                descripcion.append(f"{service_id}-{quantity}")
+                total_amount += float(total)
+
+        descripcion_str = ",".join(descripcion)
+
+        # Insertar la nueva factura en la base de datos
+        connection = connect_to_db()
+        if connection:
+            cursor = connection.cursor()
+            query = """
+            INSERT INTO Facturas (ClienteID, Descripcion, MontoTotal, Estado)
+            VALUES (?, ?, ?, ?)
+            """
+            estado = "Pendiente"  # O el estado que corresponda
+            cursor.execute(query, (cliente_id, descripcion_str, total_amount, estado))
+            connection.commit()
+            connection.close()
+
+            QMessageBox.information(self, "Éxito", "Factura guardada con éxito")
+            self.reset_invoice_form()  # Opcional: restablecer el formulario de la factura
+
+    def get_client_id_by_dni_ruc(self, dni_ruc):
+        connection = connect_to_db()
+        if connection:
+            cursor = connection.cursor()
+            # Usar comillas dobles para nombres de columna con caracteres especiales
+            query = 'SELECT ClienteID FROM Clientes WHERE "DNI/RUC" = ?'
+            cursor.execute(query, (dni_ruc,))
+            result = cursor.fetchone()
+            connection.close()
+            if result:
+                return result[0]
+        return None
+
+    def reset_invoice_form(self):
+        # Limpiar el formulario de la factura
+        self.dni_ruc_display.clear()
+        self.nombre_display.clear()
+        self.services_table.setRowCount(0)
+
+    def create_pagos_layout(self):
+        # Crear el layout principal para pagos
+        pagos_layout = QVBoxLayout()
+
+        # Crear el layout para el campo de búsqueda
+        search_layout = QHBoxLayout()
+        
+        # Campo de búsqueda para FacturaID
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Buscar por FacturaID")
+        
+        # Botón de búsqueda
+        search_button = QPushButton("Buscar")
+        search_button.clicked.connect(self.search_factura)
+        
+        search_layout.addWidget(QLabel("Buscar:"))
+        search_layout.addWidget(self.search_input)
+        search_layout.addWidget(search_button)
+        
+        pagos_layout.addLayout(search_layout)
+
+        # Crear la tabla para mostrar las facturas
+        self.pagos_table = QTableWidget()
+        self.pagos_table.setColumnCount(5)
+        self.pagos_table.setHorizontalHeaderLabels(["FacturaID", "DNI/RUC", "Monto Total", "Fecha", "Estado"])
+        
+        # Configurar la tabla
+        header = self.pagos_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)  # Ajustar columnas al ancho
+        self.pagos_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        
+        pagos_layout.addWidget(self.pagos_table)
+
+        # Botón para ver detalles de la factura seleccionada
+        detalles_button = QPushButton("Detalles")
+        detalles_button.clicked.connect(self.show_factura_details)
+        pagos_layout.addWidget(detalles_button)
+
+        # Crear un widget para el layout de pagos
+        pagos_widget = QWidget()
+        pagos_widget.setLayout(pagos_layout)
+        self.stacked_widget.addWidget(pagos_widget)
+
+        # Cargar todas las facturas al inicializar el layout
+        self.load_all_facturas()
+
+
+
+    def load_all_facturas(self):
+        connection = connect_to_db()
+        if connection:
+            cursor = connection.cursor()
+            query = """
+            SELECT f.FacturasID, c.[DNI/RUC], f.MontoTotal, f.FechaFactura, f.Estado
+            FROM Facturas f
+            JOIN Clientes c ON f.ClienteID = c.ClienteID
+            """
+            cursor.execute(query)
+            results = cursor.fetchall()
+            self.update_pagos_table(results)
+            connection.close()
+
+    
+    def search_factura(self):
+        factura_id = self.search_input.text()
+        connection = connect_to_db()
+        if connection:
+            cursor = connection.cursor()
+            query = """
+            SELECT f.FacturasID, c.[DNI/RUC], f.MontoTotal, f.FechaFactura, f.Estado
+            FROM Facturas f
+            JOIN Clientes c ON f.ClienteID = c.ClienteID
+            WHERE f.FacturasID = ?
+            """
+            cursor.execute(query, (factura_id,))
+            results = cursor.fetchall()
+            self.update_pagos_table(results)
+            connection.close()
+        
+    def show_factura_details(self):
+        selected_row = self.pagos_table.currentRow()
+        if selected_row >= 0:
+            factura_id_item = self.pagos_table.item(selected_row, 0)
+            dni_ruc_item = self.pagos_table.item(selected_row, 1)
+            
+            if factura_id_item and dni_ruc_item:
+                factura_id = factura_id_item.text()
+                dni_ruc = dni_ruc_item.text()
+
+                # Crear y mostrar el diálogo con los detalles
+                dialog = FacturaDetailsDialog(factura_id, dni_ruc, self)
+                dialog.exec()
+            else:
+                QMessageBox.warning(self, "Error", "No se encontraron detalles para la factura seleccionada.")
+
+
+
+
+    def update_pagos_table(self, results):
+        self.pagos_table.setRowCount(0)  # Clear existing rows
+        for row_index, row_data in enumerate(results):
+            self.pagos_table.insertRow(row_index)
+            for col_index, data in enumerate(row_data):
+                item = QTableWidgetItem(str(data))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+                self.pagos_table.setItem(row_index, col_index, item)
+
+
+
+
+
+
+
+    #regresar al layout principal
+    def regresar(self):
+        # Función que maneja el botón regresar
+        self.stacked_widget.setCurrentIndex(0)
 
 
     def handle_button_click(self):
@@ -498,11 +760,9 @@ class MainWindow(QMainWindow):
         if sender.text() == "Clientes":
             self.stacked_widget.setCurrentIndex(1) 
         elif sender.text() == "Facturas":
-            self.stacked_widget.setCurrentIndex(2) 
-            pass
+            self.stacked_widget.setCurrentIndex(2)
         elif sender.text() == "Pagos":
-            # Cambiar al índice correspondiente al layout de Pagos
-            pass
+            self.stacked_widget.setCurrentIndex(3)
         elif sender.text() == "Servicios":
             # Cambiar al índice correspondiente al layout de Servicios
             pass

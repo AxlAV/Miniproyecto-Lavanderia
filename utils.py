@@ -18,5 +18,5 @@ def is_valid_email(email):
     return re.match(email_pattern, email) is not None
 
 def is_valid_dni(dni_ruc):
-    return dni_ruc.isdigit() and len(dni_ruc) <= 20
+    return dni_ruc.isdigit() and len(dni_ruc) <= 20 and len(dni_ruc) >= 8
 
